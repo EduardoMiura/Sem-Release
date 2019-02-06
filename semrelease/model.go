@@ -44,6 +44,7 @@ type Release struct {
 	SHA     string
 	Version *semver.Version
 }
+
 type Config struct {
 	InstalationID string         `json:"InstalationID,omitempty"`
 	IntegrationID string         `json:"IntegrationId,omitempty"`

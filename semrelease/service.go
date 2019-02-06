@@ -2,17 +2,18 @@ package semrelease
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
+	"io/ioutil"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/github"
+	"golang.org/x/oauth2"
 
 	"github.com/Masterminds/semver"
 )
@@ -24,14 +25,15 @@ type Service struct {
 // CalculateChanges ...
 func (s Service) CalculateChanges(commits []*Commit, latestRelease *Release) Change {
 	var change Change
+
 	for _, commit := range commits {
-		if latestRelease.SHA == commit.SHA {
-			break
-		}
-		change.Major = change.Major || commit.Change.Major
-		change.Minor = change.Minor || commit.Change.Minor
-		change.Patch = change.Patch || commit.Change.Patch
+		change.Major = commit.Change.Major
+		change.Minor = commit.Change.Minor
+		change.Patch = commit.Change.Patch
+		break
+
 	}
+
 	return change
 }
 
@@ -40,7 +42,9 @@ func (s Service) GetNewVersion(commits []*Commit, latestRelease *Release) *semve
 	if latestRelease == nil {
 		return s.ApplyChange(&semver.Version{}, Change{})
 	}
-	return s.ApplyChange(latestRelease.Version, s.CalculateChanges(commits, latestRelease))
+	fmt.Println(commits[0], "commits")
+	ch := s.CalculateChanges(commits, latestRelease)
+	return s.ApplyChange(latestRelease.Version, ch)
 }
 
 // CheckHealth ...
@@ -89,22 +93,22 @@ func (s Service) ApplyChange(version *semver.Version, change Change) *semver.Ver
 }
 
 var typeToText = map[string]string{
-	"feat":     "Feature",
-	"fix":      "Bug Fixes",
+	"feat":     "A new Feature",
+	"fix":      "A Bug Fixes",
 	"perf":     "Performance Improvements",
 	"revert":   "Reverts",
-	"docs":     "Documentation",
+	"docs":     "Documentation only change",
 	"style":    "Styles",
 	"refactor": "Code Refactoring",
-	"test":     "Tests",
-	"chore":    "Chores",
+	"test":     "Add Tests",
+	"chore":    "Change to the build process Chores",
 	"%%bc%%":   "Breaking Changes",
 }
 
 func formatCommit(c *Commit) string {
 	ret := "* "
 	if c.Scope != "" {
-		ret += fmt.Sprintf("**%s:** ", c.Scope)
+		ret += fmt.Sprintf("%s: ", c.Scope)
 	}
 	ret += fmt.Sprintf("%s (%s)\n", c.Message, trimSHA(c.SHA))
 	return ret
@@ -128,26 +132,41 @@ func getSortedKeys(m *map[string]string) []string {
 }
 
 // CreateRelease ...
-func (s Service) CreateRelease(owner, repo string) {
+func (s Service) CreateRelease(owner, repo string) *semver.Version {
+
 	cl := s.ReturnClient()
+
 	ctx := context.TODO()
 	cm, _, _ := cl.Repositories.ListCommits(ctx, owner, repo, nil)
 	var commits []*Commit
 	for _, commit := range cm {
 		c := parseCommit(commit)
+
 		if c.Type != "" {
 			commits = append(commits, c)
 			break
 		}
 	}
-	lastedRelease, _ := s.GetLatestRelease()
+	lastedRelease, _ := s.GetLatestRelease(owner, repo)
+
 	version := s.GetNewVersion(commits, lastedRelease)
+
 	changelog := s.GetChangelog(commits, lastedRelease, version)
-	s.createRelease(owner, repo, changelog, version, false, "master")
+	_, rep := s.createRelease(owner, repo, changelog, version, false, "master")
+	createFileRelease(rep)
+	return version
 }
 
-func (s Service) createRelease(owner, repo, changelog string, newVersion *semver.Version, prerelease bool, branch string) error {
+func createFileRelease(data interface{}) {
+	b, _ := json.MarshalIndent(data, "", " ")
+	fmt.Println(string(b))
+	er := ioutil.WriteFile("file.json", b, 0644)
+	if er != nil {
+		fmt.Println("file is generate ")
+	}
+}
 
+func (s Service) createRelease(owner, repo, changelog string, newVersion *semver.Version, prerelease bool, branch string) (error, *github.RepositoryRelease) {
 	tag := fmt.Sprintf("v%s", newVersion.String())
 	isPrerelease := prerelease || newVersion.Prerelease() != ""
 	ctx := context.TODO()
@@ -160,53 +179,26 @@ func (s Service) createRelease(owner, repo, changelog string, newVersion *semver
 		Prerelease:      &isPrerelease,
 	}
 	cl := s.ReturnClient()
-
-	_, _, err := cl.Repositories.CreateRelease(ctx, owner, repo, opts)
+	repreturn, _, err := cl.Repositories.CreateRelease(ctx, owner, repo, opts)
 	fmt.Println(err)
 	if err != nil {
-		return err
+		return err, nil
 	}
-	return nil
+	return err, repreturn
 }
 
 // GetLatestRelease ..
-func (s Service) GetLatestRelease() (*Release, error) {
+func (s Service) GetLatestRelease(owner, repo string) (*Release, error) {
 	ctx := context.TODO()
-	owner := "eduardokenjimiura"
-	repo := "REPOSITORIOAPP"
-	allReleases := make(Releases, 0)
-	opts := &github.ReferenceListOptions{"tags", github.ListOptions{PerPage: 100}}
 	cl := s.ReturnClient()
-	for {
-		refs, resp, err := cl.Git.ListRefs(ctx, owner, repo, opts)
-		if resp != nil && resp.StatusCode == 404 {
-			return &Release{"", &semver.Version{}}, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range refs {
-			version, err := semver.NewVersion(strings.TrimPrefix(r.GetRef(), "refs/tags/"))
-			if err != nil {
-				continue
-			}
-			allReleases = append(allReleases, &Release{r.Object.GetSHA(), version})
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-	var lastRelease *Release
-	for _, r := range allReleases {
-		if r.Version.Prerelease() == "" {
-			lastRelease = r
-			break
-		}
-	}
-
+	RepositoryRelease, _, _ := cl.Repositories.GetLatestRelease(ctx, owner, repo)
+	version, _ := semver.NewVersion(RepositoryRelease.GetTagName())
+	tagref := "tags/" + RepositoryRelease.GetTagName()
+	d, _, _ := cl.Git.GetRef(ctx, owner, repo, tagref)
+	lastRelease := &Release{}
+	lastRelease.SHA = d.Object.GetSHA()
+	lastRelease.Version = version
 	return lastRelease, nil
-
 }
 
 // GetChangelog ..
@@ -261,26 +253,26 @@ func (s Service) CaptureRepositoryAndOwner(pullRequest interface{}) (string, str
 	}
 	return "", ""
 }
+
 func (s Service) ReturnClient() *github.Client {
-	tr := http.DefaultTransport
-	itr, err := ghinstallation.NewKeyFromFile(tr, 22198, 515453, "privatekey.pem")
-	if err != nil {
-		log.Fatal(err)
-	}
-	client := github.NewClient(&http.Client{Transport: itr})
+	ctx := context.Background()
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: os.Getenv("AccessToken")},
+	)
+	tc := oauth2.NewClient(ctx, ts)
+	client := github.NewClient(tc)
 	return client
 }
 
 var breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
 
-var commitPattern = regexp.MustCompile("^(\\w*)(?:\\((.*)\\))?\\: (.*)$")
+var commitPattern = regexp.MustCompile("^(\\w*) (?:\\((.*)\\))?\\: (.*)$")
 
 func parseCommit(commit *github.RepositoryCommit) *Commit {
+	message := strings.TrimSpace(commit.Commit.GetMessage())
 	c := new(Commit)
 	c.SHA = commit.GetSHA()
-	fmt.Println(c.SHA)
-	c.Raw = strings.Split(commit.Commit.GetMessage(), "\n")
-	strings.Split(commit.Commit.GetMessage(), "\n")
+	c.Raw = strings.Split(message, " ")
 
 	// for _, sp := range split {
 	// 	found := commitPattern.FindAllStringSubmatch(sp, -1)
@@ -290,27 +282,41 @@ func parseCommit(commit *github.RepositoryCommit) *Commit {
 	// 	}
 	// 	break
 	// }
+	found := commitPattern.MatchString(message)
 
-	found := commitPattern.FindAllStringSubmatch(c.Raw[0], -1)
-	if len(found) < 1 {
+	if found {
 		return c
 	}
-	//c.Type = strings.ToLower(found[0][0])
-
-	message := c.Raw[0]
-	tp := message[:strings.IndexByte(message, ':')]
+	tp := c.Raw[0]
 	c.Type = tp
 	if len(tp) > 0 {
-		scope := message[strings.IndexByte(message, ':'):]
+		scope := message[strings.IndexByte(message, ':')+1:]
 		c.Scope = scope
-		//	c.Message = found[0][3]
+		c.Message = c.Raw[1]
 	}
 	c.Change = Change{
 		Major: breakingPattern.MatchString(c.Raw[0]),
 		Minor: c.Type == "feat",
-		Patch: c.Type == "fix",
+		Patch: Patch(c.Type),
 	}
 	return c
+}
+
+func Patch(typeOfChange string) bool {
+	switch typeOfChange {
+	case
+		"fix",
+		"perf",
+		"revert",
+		"docs",
+		"style",
+		"refactor",
+		"test",
+		"chore":
+		return true
+	}
+	return false
+
 }
 
 func (s Service) GetRepositories() ([]*github.Repository, error) {
