@@ -2,6 +2,7 @@ package semrelease
 
 import (
 	"context"
+	"os"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -16,8 +17,9 @@ type RepositoryImpl struct {
 
 func NewRepository() *RepositoryImpl {
 	ctx := context.Background()
+	AccessToken := os.Getenv("AccessToken")
 	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: "15bcf142682db5244445b83da33b1f872a399624"},
+		&oauth2.Token{AccessToken: AccessToken},
 	)
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
