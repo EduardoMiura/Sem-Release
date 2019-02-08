@@ -6,8 +6,8 @@ import (
 	"github.com/Masterminds/semver"
 )
 
-// Repository ..
-type Repository struct {
+// Repo ..
+type Repo struct {
 	Owner Owner  `json:"owner"`
 	Name  string `json:"name"`
 }
@@ -19,7 +19,7 @@ type PullRequest struct {
 
 // Event ..
 type Event struct {
-	Repository  Repository   `json:"repository"`
+	Repository  Repo         `json:"repository"`
 	Action      string       `json:"action"`
 	PullRequest *PullRequest `json:"pull_request"`
 }
@@ -31,20 +31,27 @@ type Owner struct {
 
 // Commit ..
 type Commit struct {
-	SHA     string
-	Raw     []string
-	Type    string
-	Scope   string
-	Message string
-	Change  Change
+	SHA              string `json:"sha,omitempty"`
+	AbbreviatedSHA   string `json:"abbreviatedSHA,omitempty"`
+	Raw              []string
+	Type             string
+	Scope            string
+	Message          string `json:"message,omitempty"`
+	SanitizedMessage string `json:"sanitizeMessage,omitempty"`
+	Change           Change
 }
 
 // Release ..
 type Release struct {
-	SHA     string
-	Version *semver.Version
+	SHA          string
+	Version      *semver.Version
+	Change       Change
+	ChangeLog    string
+	Branch       string
+	IsPreRelease bool
 }
 
+// Config ...
 type Config struct {
 	InstalationID string         `json:"InstalationID,omitempty"`
 	IntegrationID string         `json:"IntegrationId,omitempty"`

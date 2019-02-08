@@ -1,30 +1,28 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
+	"context"
 	"os"
 
 	"github.com/catho/Sem-Release/semrelease"
+	"github.com/google/go-github/github"
+	"golang.org/x/oauth2"
 )
 
 func main() {
-
-	repository := semrelease.NewRepository()
+	accessToken := os.Getenv("ACCESS_TOKEN")
+	ctx := context.Background()
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: accessToken},
+	)
+	tc := oauth2.NewClient(ctx, ts)
+	client := github.NewClient(tc)
+	repository := semrelease.NewRepository(client)
 	service := semrelease.NewService(repository)
-	owner := os.Getenv("owner")
-	repo := os.Getenv("repository")
-	owner = "eduardokenjimiura"
-	repo = "job_configuration"
-	service.CreateRelease(owner, repo)
-	fmt.Println("finish")
+	owner := os.Getenv("OWNER")
+	repo := os.Getenv("REPOSITORY")
+	service.CreateRelease(ctx, owner, repo)
+	repository.CloneRepository(ctx, owner, repo, accessToken)
+}
 
-}
-func jsonMarshal(t interface{}) ([]byte, error) {
-	buffer := &bytes.Buffer{}
-	encoder := json.NewEncoder(buffer)
-	encoder.SetEscapeHTML(false)
-	err := encoder.Encode(t)
-	return buffer.Bytes(), err
-}
+//url := fmt.Sprintf("https://%s:x-oauth-basic@github.com/%s/%s.git", token, owner, repo)

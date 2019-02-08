@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -13,48 +12,151 @@ import (
 	"time"
 
 	"github.com/google/go-github/github"
-	"golang.org/x/oauth2"
 
 	"github.com/Masterminds/semver"
 )
 
+var breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
+var commitPattern = regexp.MustCompile(`^([\w\s]*)(?:\((.*)\))?\: (.*)$`)
+
+// Service ...
 type Service struct {
-	GitRepositoryApplication IRepository
+	Repository Repository
 }
 
-// CalculateChanges ...
-func (s Service) CalculateChanges(commits []*Commit, latestRelease *Release) Change {
-	var change Change
+// NewService ...
+func NewService(repository Repository) Service {
+	return Service{
+		Repository: repository,
+	}
+}
 
-	for _, commit := range commits {
-		change.Major = commit.Change.Major
-		change.Minor = commit.Change.Minor
-		change.Patch = commit.Change.Patch
-		break
-
+// CreateRelease ...
+func (s Service) CreateRelease(ctx context.Context, owner, repo string) (*semver.Version, error) {
+	lastedRelease, err := s.getLatestRelease(ctx, owner, repo)
+	if err != nil {
+		return nil, err
 	}
 
+	cm, err := s.Repository.listCommits(ctx, owner, repo, lastedRelease)
+	if err != nil {
+		return nil, err
+	}
+
+
+
+
+
+	var commits []*Commit
+	for _, commit := range cm {
+		c := parseCommit(commit)
+		if c.Type != "" {
+			commits = append(commits, c)
+		}
+	}
+
+	version := s.getNewVersion(commits, lastedRelease)
+	changelog := s.getChangelog(commits, lastedRelease, version)
+	rep, err := s.createRelease(ctx, owner, repo, changelog, version, false, "master")
+	createFileRelease(rep)
+	return version, err
+}
+
+// getLatestRelease ...
+func (s Service) getLatestRelease(ctx context.Context, owner, repo string) (*Release, error) {
+	latestRelease, err := s.Repository.getLatestRelease(ctx, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+
+	version, err := semver.NewVersion(latestRelease.GetTagName())
+	if err != nil {
+		return nil, err
+	}
+
+	tagReference := "tags/" + latestRelease.GetTagName()
+	reference, err := s.Repository.getReference(ctx, owner, repo, tagReference)
+	if err != nil {
+		return nil, err
+	}
+
+	lastRelease := &Release{}
+	lastRelease.SHA = reference.Object.GetSHA()
+	lastRelease.Version = version
+
+	return lastRelease, nil
+}
+
+func parseCommit(commit *github.RepositoryCommit) *Commit {
+	message := strings.TrimSpace(commit.Commit.GetMessage())
+	c := new(Commit)
+	c.SHA = commit.GetSHA()
+	c.Raw = strings.Split(message, " ")
+	found := commitPattern.MatchString(message)
+
+	if !found {
+		return c
+	}
+	tp := c.Raw[0]
+	c.Type = tp
+	if len(tp) > 0 {
+		scope := message[strings.IndexByte(message, ':')+1:]
+		c.Scope = scope
+		c.Message = c.Raw[1]
+	}
+
+	c.Change = Change{
+		Major: breakingPattern.MatchString(c.Raw[0]),
+		Minor: c.Type == "feat",
+		Patch: isPatch(c.Type),
+	}
+	return c
+}
+
+// isPatch ...
+func isPatch(typeOfChange string) bool {
+	switch typeOfChange {
+	case
+		"fix",
+		"perf",
+		"revert",
+		"docs",
+		"style",
+		"refactor",
+		"test",
+		"chore":
+		return true
+	}
+	return false
+
+}
+
+// calculateChanges ...
+func (s Service) calculateChanges(commits []*Commit, latestRelease *Release) Change {
+	var change Change
+	for _, commit := range commits {
+		change.Major = commit.Change.Major
+		if change.Major {
+			break
+		}
+
+		change.Minor = commit.Change.Minor
+		change.Patch = commit.Change.Patch
+	}
 	return change
 }
 
-// GetNewVersion calcula new version
-func (s Service) GetNewVersion(commits []*Commit, latestRelease *Release) *semver.Version {
+// getNewVersion create new version
+func (s Service) getNewVersion(commits []*Commit, latestRelease *Release) *semver.Version {
 	if latestRelease == nil {
-		return s.ApplyChange(&semver.Version{}, Change{})
+		return s.applyChange(&semver.Version{}, Change{})
 	}
-	fmt.Println(commits[0], "commits")
-	ch := s.CalculateChanges(commits, latestRelease)
-	return s.ApplyChange(latestRelease.Version, ch)
+	ch := s.calculateChanges(commits, latestRelease)
+	return s.applyChange(latestRelease.Version, ch)
 }
 
-// CheckHealth ...
-func (s Service) CheckHealth(ctx context.Context, timeout time.Duration) error {
-
-	return nil
-}
-
-// ApplyChange ...
-func (s Service) ApplyChange(version *semver.Version, change Change) *semver.Version {
+// applyChange ...
+func (s Service) applyChange(version *semver.Version, change Change) *semver.Version {
 	if version.Major() == 0 {
 		change.Major = true
 	}
@@ -131,32 +233,6 @@ func getSortedKeys(m *map[string]string) []string {
 	return keys
 }
 
-// CreateRelease ...
-func (s Service) CreateRelease(owner, repo string) *semver.Version {
-
-	cl := s.ReturnClient()
-
-	ctx := context.TODO()
-	cm, _, _ := cl.Repositories.ListCommits(ctx, owner, repo, nil)
-	var commits []*Commit
-	for _, commit := range cm {
-		c := parseCommit(commit)
-
-		if c.Type != "" {
-			commits = append(commits, c)
-			break
-		}
-	}
-	lastedRelease, _ := s.GetLatestRelease(owner, repo)
-
-	version := s.GetNewVersion(commits, lastedRelease)
-
-	changelog := s.GetChangelog(commits, lastedRelease, version)
-	_, rep := s.createRelease(owner, repo, changelog, version, false, "master")
-	createFileRelease(rep)
-	return version
-}
-
 func createFileRelease(data interface{}) {
 	b, _ := json.MarshalIndent(data, "", " ")
 	fmt.Println(string(b))
@@ -166,11 +242,9 @@ func createFileRelease(data interface{}) {
 	}
 }
 
-func (s Service) createRelease(owner, repo, changelog string, newVersion *semver.Version, prerelease bool, branch string) (error, *github.RepositoryRelease) {
+func (s Service) createRelease(ctx context.Context, owner, repo, changelog string, newVersion *semver.Version, prerelease bool, branch string) (*github.RepositoryRelease, error) {
 	tag := fmt.Sprintf("v%s", newVersion.String())
 	isPrerelease := prerelease || newVersion.Prerelease() != ""
-	ctx := context.TODO()
-
 	opts := &github.RepositoryRelease{
 		TagName:         &tag,
 		Name:            &tag,
@@ -178,31 +252,12 @@ func (s Service) createRelease(owner, repo, changelog string, newVersion *semver
 		Body:            &changelog,
 		Prerelease:      &isPrerelease,
 	}
-	cl := s.ReturnClient()
-	repreturn, _, err := cl.Repositories.CreateRelease(ctx, owner, repo, opts)
-	fmt.Println(err)
-	if err != nil {
-		return err, nil
-	}
-	return err, repreturn
+
+	return s.Repository.createRelease(ctx, owner, repo, opts)
 }
 
-// GetLatestRelease ..
-func (s Service) GetLatestRelease(owner, repo string) (*Release, error) {
-	ctx := context.TODO()
-	cl := s.ReturnClient()
-	RepositoryRelease, _, _ := cl.Repositories.GetLatestRelease(ctx, owner, repo)
-	version, _ := semver.NewVersion(RepositoryRelease.GetTagName())
-	tagref := "tags/" + RepositoryRelease.GetTagName()
-	d, _, _ := cl.Git.GetRef(ctx, owner, repo, tagref)
-	lastRelease := &Release{}
-	lastRelease.SHA = d.Object.GetSHA()
-	lastRelease.Version = version
-	return lastRelease, nil
-}
-
-// GetChangelog ..
-func (s Service) GetChangelog(commits []*Commit, latestRelease *Release, newVersion *semver.Version) string {
+// getChangelog ..
+func (s Service) getChangelog(commits []*Commit, latestRelease *Release, newVersion *semver.Version) string {
 	ret := fmt.Sprintf("## %s (%s)\n\n", newVersion.String(), time.Now().UTC().Format("2006-01-02"))
 	typeScopeMap := make(map[string]string)
 	for _, commit := range commits {
@@ -227,106 +282,4 @@ func (s Service) GetChangelog(commits []*Commit, latestRelease *Release, newVers
 		ret += fmt.Sprintf("#### %s\n\n%s\n", typeName, msg)
 	}
 	return ret
-}
-func (s Service) CaptureRepositoryAndOwner(pullRequest interface{}) (string, string) {
-	///mudar esse cara para recursivo
-	if (pullRequest) != nil {
-		head := pullRequest.(map[string]interface{})
-		if head != nil {
-
-			repo := head["head"]
-			if repo != nil {
-				rp := repo.(map[string]interface{})
-				if rp != nil {
-					owner := rp["repo"]
-					if owner != nil {
-
-						ow := owner.(map[string]interface{})
-						repositoryname := ow["name"].(string)
-						login := ow["owner"].(map[string]interface{})["login"].(string)
-						return repositoryname, login
-					}
-				}
-			}
-
-		}
-	}
-	return "", ""
-}
-
-func (s Service) ReturnClient() *github.Client {
-	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: os.Getenv("AccessToken")},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
-	return client
-}
-
-var breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
-
-var commitPattern = regexp.MustCompile("^(\\w*) (?:\\((.*)\\))?\\: (.*)$")
-
-func parseCommit(commit *github.RepositoryCommit) *Commit {
-	message := strings.TrimSpace(commit.Commit.GetMessage())
-	c := new(Commit)
-	c.SHA = commit.GetSHA()
-	c.Raw = strings.Split(message, " ")
-
-	// for _, sp := range split {
-	// 	found := commitPattern.FindAllStringSubmatch(sp, -1)
-	// 	if len(found) < 1 {
-	// 		fmt.Println(found, "  ==================== ", sp)
-	// 		return c
-	// 	}
-	// 	break
-	// }
-	found := commitPattern.MatchString(message)
-
-	if found {
-		return c
-	}
-	tp := c.Raw[0]
-	c.Type = tp
-	if len(tp) > 0 {
-		scope := message[strings.IndexByte(message, ':')+1:]
-		c.Scope = scope
-		c.Message = c.Raw[1]
-	}
-	c.Change = Change{
-		Major: breakingPattern.MatchString(c.Raw[0]),
-		Minor: c.Type == "feat",
-		Patch: Patch(c.Type),
-	}
-	return c
-}
-
-func Patch(typeOfChange string) bool {
-	switch typeOfChange {
-	case
-		"fix",
-		"perf",
-		"revert",
-		"docs",
-		"style",
-		"refactor",
-		"test",
-		"chore":
-		return true
-	}
-	return false
-
-}
-
-func (s Service) GetRepositories() ([]*github.Repository, error) {
-
-	ctx := context.TODO()
-	return s.GitRepositoryApplication.AllRepository(ctx)
-}
-
-func NewService(gitRepository IRepository) *Service {
-	return &Service{
-		GitRepositoryApplication: gitRepository,
-	}
 }
