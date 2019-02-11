@@ -31,14 +31,14 @@ type Owner struct {
 
 // Commit ..
 type Commit struct {
-	SHA              string `json:"sha,omitempty"`
-	AbbreviatedSHA   string `json:"abbreviatedSHA,omitempty"`
-	Raw              []string
-	Type             string
-	Scope            string
-	Message          string `json:"message,omitempty"`
-	SanitizedMessage string `json:"sanitizeMessage,omitempty"`
-	Change           Change
+	SHA              string   `json:"sha,omitempty"`
+	AbbreviatedSHA   string   `json:"abbreviatedSHA,omitempty"`
+	Raw              []string `json:"raw,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Scope            string   `json:"scope,omitempty"`
+	Message          string   `json:"message,omitempty"`
+	SanitizedMessage string   `json:"sanitizeMessage,omitempty"`
+	Change           Change   `json:"change,omitempty"`
 }
 
 // Release ..

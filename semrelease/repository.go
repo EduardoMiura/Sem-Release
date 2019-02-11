@@ -7,20 +7,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/google/go-github/github"
 )
 
 const (
-	logFormat = `{"sha": "%H", "abbreviatedSHA": "%h", "message": "%s", "sanitizedMessage": "%f"},`
+	logFormat      = `{"sha": "%H", "abbreviatedSHA": "%h", "message": "%s", "sanitizedMessage": "%f"},`
+	initialVersion = "v1.0.0"
 )
 
 // Repository ...
 type Repository interface {
 	CloneRepository(ctx context.Context, owner, repo, token string) error
+	ListCommits(ctx context.Context, owner, repo string, latestRelease string) ([]Commit, error)
+	GetLatestRelease(ctx context.Context, owner, repo string) (string, error)
 
-	listCommits(ctx context.Context, owner, repo string, latestRelease *Release) ([]*github.RepositoryCommit, error)
-	getLatestRelease(ctx context.Context, owner, repo string) (*github.RepositoryRelease, error)
 	getReference(ctx context.Context, owner, repo, reference string) (*github.Reference, error)
 	createRelease(ctx context.Context, owner, repo string, repositoryRelease *github.RepositoryRelease) (*github.RepositoryRelease, error)
 }
@@ -44,18 +46,26 @@ func (r GitHubRepository) CloneRepository(ctx context.Context, owner, repo, toke
 	return cmd.Run()
 }
 
-// TODO: listar a partir do ultimo release
-func (r GitHubRepository) listCommits(ctx context.Context, owner, repo string, lastestRelease *Release) ([]Commit, error) {
+// ListCommits ...
+func (r GitHubRepository) ListCommits(ctx context.Context, owner, repo string, lastestRelease string) ([]Commit, error) {
 	var commits []Commit
 	var stdout bytes.Buffer
-
-	version := lastestRelease.Version.String()
+	
 	path, err := os.Getwd()
 	if err != nil {
 		return commits, err
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "log", fmt.Sprintf("v%s..", version), fmt.Sprintf("--format=%s", logFormat))
+	args := []string{
+		"log",
+		fmt.Sprintf("--format=%s", logFormat),
+	}
+
+	if lastestRelease != "" {
+		args = append(args, fmt.Sprintf("%s..", lastestRelease))
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = fmt.Sprintf("%s/%s", path, repo)
 	cmd.Stdout = &stdout
 	err = cmd.Run()
@@ -70,13 +80,27 @@ func (r GitHubRepository) listCommits(ctx context.Context, owner, repo string, l
 	return commits, err
 }
 
-func (r GitHubRepository) getLatestRelease(ctx context.Context, owner, repo string) (*github.RepositoryRelease, error) {
+// GetLatestRelease ...
+func (r GitHubRepository) GetLatestRelease(ctx context.Context, owner, repo string) (string, error) {
+	var stdout bytes.Buffer
+	path, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
 
+	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "refs/tags", "--sort=-taggerdate", "--format=%(refname:short)", "--count=1")
+	cmd.Dir = fmt.Sprintf("%s/%s", path, repo)
+	cmd.Stdout = &stdout
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
 
-//git for-each-ref refs/tags --sort=-taggerdate --format='%(refname)' --count=1
-
-	latestRelease, _, err := r.Client.Repositories.GetLatestRelease(ctx, owner, repo)
-	return latestRelease, err
+	version := strings.Trim(stdout.String(), "\n")
+	if version == "" {
+		version = initialVersion
+	}
+	return version, nil
 }
 
 func (r GitHubRepository) getReference(ctx context.Context, owner, repo, reference string) (*github.Reference, error) {

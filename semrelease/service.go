@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,8 +17,10 @@ import (
 	"github.com/Masterminds/semver"
 )
 
-var breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
-var commitPattern = regexp.MustCompile(`^([\w\s]*)(?:\((.*)\))?\: (.*)$`)
+var (
+	breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
+	commitPattern   = regexp.MustCompile(`^(?P<type>[\w\s]*)(?:\((?P<scope>.*)\))?\:(?P<message>.*)$`)
+)
 
 // Service ...
 type Service struct {
@@ -33,77 +36,60 @@ func NewService(repository Repository) Service {
 
 // CreateRelease ...
 func (s Service) CreateRelease(ctx context.Context, owner, repo string) (*semver.Version, error) {
-	lastedRelease, err := s.getLatestRelease(ctx, owner, repo)
+	lastedRelease, err := s.Repository.GetLatestRelease(ctx, owner, repo) //s.getLatestRelease(ctx, owner, repo)
 	if err != nil {
 		return nil, err
 	}
 
-	cm, err := s.Repository.listCommits(ctx, owner, repo, lastedRelease)
+	cm, err := s.Repository.ListCommits(ctx, owner, repo, lastedRelease)
 	if err != nil {
 		return nil, err
 	}
-
-
-
-
 
 	var commits []*Commit
-	for _, commit := range cm {
+	for i, commit := range cm {
 		c := parseCommit(commit)
-		if c.Type != "" {
+		if c != nil {
 			commits = append(commits, c)
 		}
+
+		b, _ := json.Marshal(c)
+		log.Println("parse", i, string(b))
 	}
 
-	version := s.getNewVersion(commits, lastedRelease)
-	changelog := s.getChangelog(commits, lastedRelease, version)
-	rep, err := s.createRelease(ctx, owner, repo, changelog, version, false, "master")
-	createFileRelease(rep)
-	return version, err
+	// version := s.getNewVersion(commits, lastedRelease)
+	// changelog := s.getChangelog(commits, lastedRelease, version)
+	// rep, err := s.createRelease(ctx, owner, repo, changelog, version, false, "master")
+	// createFileRelease(rep)
+	// return version, err
+	return nil, err
 }
 
-// getLatestRelease ...
-func (s Service) getLatestRelease(ctx context.Context, owner, repo string) (*Release, error) {
-	latestRelease, err := s.Repository.getLatestRelease(ctx, owner, repo)
-	if err != nil {
-		return nil, err
+//func parseCommit(commit *github.RepositoryCommit) *Commit {
+func parseCommit(commit Commit) *Commit {
+	message := strings.TrimSpace(commit.Message)
+	if !commitPattern.MatchString(message) {
+		return nil
 	}
 
-	version, err := semver.NewVersion(latestRelease.GetTagName())
-	if err != nil {
-		return nil, err
+	commitValues := map[string]string{}
+	groupNames := commitPattern.SubexpNames()
+	matches := commitPattern.FindStringSubmatch(message)
+
+	for i, name := range groupNames {
+		if name == "" {
+			continue
+		}
+
+		commitValues[name] = matches[i]
 	}
 
-	tagReference := "tags/" + latestRelease.GetTagName()
-	reference, err := s.Repository.getReference(ctx, owner, repo, tagReference)
-	if err != nil {
-		return nil, err
-	}
-
-	lastRelease := &Release{}
-	lastRelease.SHA = reference.Object.GetSHA()
-	lastRelease.Version = version
-
-	return lastRelease, nil
-}
-
-func parseCommit(commit *github.RepositoryCommit) *Commit {
-	message := strings.TrimSpace(commit.Commit.GetMessage())
 	c := new(Commit)
-	c.SHA = commit.GetSHA()
+	c.SHA = commit.SHA
 	c.Raw = strings.Split(message, " ")
-	found := commitPattern.MatchString(message)
-
-	if !found {
-		return c
-	}
-	tp := c.Raw[0]
-	c.Type = tp
-	if len(tp) > 0 {
-		scope := message[strings.IndexByte(message, ':')+1:]
-		c.Scope = scope
-		c.Message = c.Raw[1]
-	}
+	c.Type = commitValues["type"]
+	c.Scope = commitValues["scope"]
+	c.Message = commitValues["message"]
 
 	c.Change = Change{
 		Major: breakingPattern.MatchString(c.Raw[0]),

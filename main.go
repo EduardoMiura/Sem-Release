@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"os"
 
 	"github.com/catho/Sem-Release/semrelease"
@@ -23,6 +24,15 @@ func main() {
 	repo := os.Getenv("REPOSITORY")
 	service.CreateRelease(ctx, owner, repo)
 	repository.CloneRepository(ctx, owner, repo, accessToken)
-}
 
-//url := fmt.Sprintf("https://%s:x-oauth-basic@github.com/%s/%s.git", token, owner, repo)
+	// TODO: update repository to make funcs private. (they are public to test repository)
+	version, err := repository.GetLatestRelease(ctx, owner, repo)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(version)
+	commits, err := repository.ListCommits(ctx, owner, repo, version)
+	if err != nil {
+		log.Fatal("commits ", err, commits)
+	}
+}
