@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +17,7 @@ import (
 
 var (
 	breakingPattern = regexp.MustCompile("BREAKING CHANGES?")
-	commitPattern   = regexp.MustCompile(`^(?P<type>[\w\s]*)(?:\((?P<scope>.*)\))?\:(?P<message>.*)$`)
+	commitPattern   = regexp.MustCompile(`^(?P<type>[\w\s]*)(?:\((?P<scope>.*)\))?\s*\:(?P<message>.*)$`)
 )
 
 // Service ...
@@ -36,26 +34,28 @@ func NewService(repository Repository) Service {
 
 // CreateRelease ...
 func (s Service) CreateRelease(ctx context.Context, owner, repo string) (*semver.Version, error) {
-	lastedRelease, err := s.Repository.GetLatestRelease(ctx, owner, repo) //s.getLatestRelease(ctx, owner, repo)
+	latestRelease, err := s.Repository.GetLatestRelease(ctx, owner, repo) //s.getLatestRelease(ctx, owner, repo)
 	if err != nil {
 		return nil, err
 	}
 
-	cm, err := s.Repository.ListCommits(ctx, owner, repo, lastedRelease)
+	cm, err := s.Repository.ListCommits(ctx, owner, repo, latestRelease)
 	if err != nil {
 		return nil, err
 	}
 
-	var commits []*Commit
-	for i, commit := range cm {
-		c := parseCommit(commit)
-		if c != nil {
-			commits = append(commits, c)
-		}
+	// var commits []*Commit
+	// for i, commit := range cm {
+	// 	c := parseCommit(commit)
+	// 	if c != nil {
+	// 		commits = append(commits, c)
+	// 	}
 
-		b, _ := json.Marshal(c)
-		log.Println("parse", i, string(b))
-	}
+	// 	b, _ := json.Marshal(c)
+	// 	log.Println("parse", i, string(b))
+	// }
+
+	s.newRelease(ctx, owner, repo, "master", latestRelease, cm)
 
 	// version := s.getNewVersion(commits, lastedRelease)
 	// changelog := s.getChangelog(commits, lastedRelease, version)
@@ -63,6 +63,64 @@ func (s Service) CreateRelease(ctx context.Context, owner, repo string) (*semver
 	// createFileRelease(rep)
 	// return version, err
 	return nil, err
+}
+
+func (s Service) newRelease(ctx context.Context, owner, repo, branch, currentRelease string, commits []Commit) Release {
+	release := Release{
+		ChangeLog: map[string][]string{},
+		SHA:       commits[0].SHA,
+		Branch:    branch,
+	}
+
+	for _, commit := range commits {
+		c := parseCommit(commit)
+		if c == nil {
+			continue
+		}
+		commit = *c
+		release.ChangeLog[commit.Type.Name] = append(release.ChangeLog[commit.Type.Name], fmt.Sprintf("* %s: %s (%s)", commit.Scope, commit.Message, commit.AbbreviatedSHA))
+
+		commitType := commitTypes[commit.Type.Name]
+		if commitType.priority.value > release.Change.value {
+			release.Change = commitType.priority
+		}
+	}
+
+	version, _ := semver.NewVersion(currentRelease)
+	var v semver.Version
+	switch release.Change.Name {
+	case "major":
+		v = version.IncMajor()
+	case "minor":
+		v = version.IncMinor()
+	case "patch":
+		v = version.IncPatch()
+	}
+
+	release.Version = &v
+	fmt.Println("AAA", currentRelease, version.String(), release.Version.String())
+	fmt.Println("CHANGE-LOG", release.ChangeLog.String())
+
+	b, _ := json.Marshal(release)
+	fmt.Println("RELEASE", string(b))
+
+	s.createRelease(ctx, owner, repo, release.ChangeLog.String(), release.Version, false, "master")
+
+	return release
+}
+
+var commitTypes = map[string]CommitType{
+	"breaking": CommitType{Name: "breaking", Description: "Breaking Changes", priority: major},
+	"bc":       CommitType{Name: "bc", Description: "Breaking Changes", priority: major},
+	"feat":     CommitType{Name: "feat", Description: "A new Feature", priority: minor},
+	"fix":      CommitType{Name: "fix", Description: "A Bug Fixes", priority: patch},
+	"perf":     CommitType{Name: "perf", Description: "Performance Improvements", priority: patch},
+	"revert":   CommitType{Name: "revert", Description: "Reverts", priority: patch},
+	"docs":     CommitType{Name: "docs", Description: "Documentation only change", priority: patch},
+	"style":    CommitType{Name: "style", Description: "Styles", priority: patch},
+	"refactor": CommitType{Name: "refactor", Description: "Code Refactoring", priority: patch},
+	"test":     CommitType{Name: "test", Description: "Add Tests", priority: patch},
+	"chore":    CommitType{Name: "chore", Description: "Change to the build process Chores", priority: patch},
 }
 
 //func parseCommit(commit *github.RepositoryCommit) *Commit {
@@ -80,23 +138,17 @@ func parseCommit(commit Commit) *Commit {
 		if name == "" {
 			continue
 		}
-
-		commitValues[name] = matches[i]
+		commitValues[name] = strings.Trim(matches[i], " ")
 	}
 
-	c := new(Commit)
-	c.SHA = commit.SHA
-	c.Raw = strings.Split(message, " ")
-	c.Type = commitValues["type"]
-	c.Scope = commitValues["scope"]
-	c.Message = commitValues["message"]
+	// c := new(Commit)
+	commit.Raw = strings.Split(message, " ")
+	commitType := commitValues["type"]
+	commit.Type = commitTypes[commitType]
+	commit.Scope = commitValues["scope"]
+	commit.Message = commitValues["message"]
 
-	c.Change = Change{
-		Major: breakingPattern.MatchString(c.Raw[0]),
-		Minor: c.Type == "feat",
-		Patch: isPatch(c.Type),
-	}
-	return c
+	return &commit
 }
 
 // isPatch ...
@@ -114,7 +166,6 @@ func isPatch(typeOfChange string) bool {
 		return true
 	}
 	return false
-
 }
 
 // calculateChanges ...
@@ -133,52 +184,52 @@ func (s Service) calculateChanges(commits []*Commit, latestRelease *Release) Cha
 }
 
 // getNewVersion create new version
-func (s Service) getNewVersion(commits []*Commit, latestRelease *Release) *semver.Version {
-	if latestRelease == nil {
-		return s.applyChange(&semver.Version{}, Change{})
-	}
-	ch := s.calculateChanges(commits, latestRelease)
-	return s.applyChange(latestRelease.Version, ch)
-}
+// func (s Service) getNewVersion(commits []*Commit, latestRelease *Release) *semver.Version {
+// 	if latestRelease == nil {
+// 		return s.applyChange(&semver.Version{}, Change{})
+// 	}
+// 	ch := s.calculateChanges(commits, latestRelease)
+// 	return s.applyChange(latestRelease.Version, ch)
+// }
 
-// applyChange ...
-func (s Service) applyChange(version *semver.Version, change Change) *semver.Version {
-	if version.Major() == 0 {
-		change.Major = true
-	}
-	if !change.Major && !change.Minor && !change.Patch {
-		return version
-	}
-	var newVersion semver.Version
-	preRel := version.Prerelease()
+// // applyChange ...
+// func (s Service) applyChange(version *semver.Version, change Change) *semver.Version {
+// 	if version.Major() == 0 {
+// 		change.Major = true
+// 	}
+// 	if !change.Major && !change.Minor && !change.Patch {
+// 		return version
+// 	}
+// 	var newVersion semver.Version
+// 	preRel := version.Prerelease()
 
-	if preRel == "" {
-		switch {
-		case change.Major:
-			newVersion = version.IncMajor()
-			break
-		case change.Minor:
-			newVersion = version.IncMinor()
-			break
-		case change.Patch:
-			newVersion = version.IncPatch()
-			break
-		}
-		return &newVersion
-	}
-	preRelVer := strings.Split(preRel, ".")
-	if len(preRelVer) > 1 {
-		idx, err := strconv.ParseInt(preRelVer[1], 10, 32)
-		if err != nil {
-			idx = 0
-		}
-		preRel = fmt.Sprintf("%s.%d", preRelVer[0], idx+1)
-	} else {
-		preRel += ".1"
-	}
-	newVersion, _ = version.SetPrerelease(preRel)
-	return &newVersion
-}
+// 	if preRel == "" {
+// 		switch {
+// 		case change.Major:
+// 			newVersion = version.IncMajor()
+// 			break
+// 		case change.Minor:
+// 			newVersion = version.IncMinor()
+// 			break
+// 		case change.Patch:
+// 			newVersion = version.IncPatch()
+// 			break
+// 		}
+// 		return &newVersion
+// 	}
+// 	preRelVer := strings.Split(preRel, ".")
+// 	if len(preRelVer) > 1 {
+// 		idx, err := strconv.ParseInt(preRelVer[1], 10, 32)
+// 		if err != nil {
+// 			idx = 0
+// 		}
+// 		preRel = fmt.Sprintf("%s.%d", preRelVer[0], idx+1)
+// 	} else {
+// 		preRel += ".1"
+// 	}
+// 	newVersion, _ = version.SetPrerelease(preRel)
+// 	return &newVersion
+// }
 
 var typeToText = map[string]string{
 	"feat":     "A new Feature",
@@ -191,15 +242,6 @@ var typeToText = map[string]string{
 	"test":     "Add Tests",
 	"chore":    "Change to the build process Chores",
 	"%%bc%%":   "Breaking Changes",
-}
-
-func formatCommit(c *Commit) string {
-	ret := "* "
-	if c.Scope != "" {
-		ret += fmt.Sprintf("%s: ", c.Scope)
-	}
-	ret += fmt.Sprintf("%s (%s)\n", c.Message, trimSHA(c.SHA))
-	return ret
 }
 
 func trimSHA(sha string) string {
@@ -254,10 +296,10 @@ func (s Service) getChangelog(commits []*Commit, latestRelease *Release, newVers
 			typeScopeMap["%%bc%%"] += fmt.Sprintf("%s\n```%s\n```\n", formatCommit(commit), strings.Join(commit.Raw[1:], "\n"))
 			continue
 		}
-		if commit.Type == "" {
+		if commit.Type.Name == "" {
 			continue
 		}
-		typeScopeMap[commit.Type] += formatCommit(commit)
+		typeScopeMap[commit.Type.Name] += formatCommit(commit)
 	}
 	for _, t := range getSortedKeys(&typeScopeMap) {
 		msg := typeScopeMap[t]
@@ -267,5 +309,14 @@ func (s Service) getChangelog(commits []*Commit, latestRelease *Release, newVers
 		}
 		ret += fmt.Sprintf("#### %s\n\n%s\n", typeName, msg)
 	}
+	return ret
+}
+
+func formatCommit(c *Commit) string {
+	ret := "* "
+	if c.Scope != "" {
+		ret += fmt.Sprintf("%s: ", c.Scope)
+	}
+	ret += fmt.Sprintf("%s (%s)\n", c.Message, trimSHA(c.SHA))
 	return ret
 }

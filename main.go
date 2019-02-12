@@ -19,11 +19,11 @@ func main() {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 	repository := semrelease.NewRepository(client)
-	service := semrelease.NewService(repository)
 	owner := os.Getenv("OWNER")
 	repo := os.Getenv("REPOSITORY")
-	service.CreateRelease(ctx, owner, repo)
 	repository.CloneRepository(ctx, owner, repo, accessToken)
+	service := semrelease.NewService(repository)
+	service.CreateRelease(ctx, owner, repo)
 
 	// TODO: update repository to make funcs private. (they are public to test repository)
 	version, err := repository.GetLatestRelease(ctx, owner, repo)

@@ -1,7 +1,10 @@
 package semrelease
 
 import (
+	"bytes"
+	"fmt"
 	"mime/multipart"
+	"strings"
 
 	"github.com/Masterminds/semver"
 )
@@ -31,24 +34,35 @@ type Owner struct {
 
 // Commit ..
 type Commit struct {
-	SHA              string   `json:"sha,omitempty"`
-	AbbreviatedSHA   string   `json:"abbreviatedSHA,omitempty"`
-	Raw              []string `json:"raw,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	Scope            string   `json:"scope,omitempty"`
-	Message          string   `json:"message,omitempty"`
-	SanitizedMessage string   `json:"sanitizeMessage,omitempty"`
-	Change           Change   `json:"change,omitempty"`
+	SHA              string     `json:"sha,omitempty"`
+	AbbreviatedSHA   string     `json:"abbreviatedSHA,omitempty"`
+	Raw              []string   `json:"raw,omitempty"`
+	Type             CommitType `json:"type,omitempty"`
+	Scope            string     `json:"scope,omitempty"`
+	Message          string     `json:"message,omitempty"`
+	SanitizedMessage string     `json:"sanitizeMessage,omitempty"`
+	Change           Change     `json:"change,omitempty"`
 }
+
+type changeLog map[string][]string
 
 // Release ..
 type Release struct {
 	SHA          string
 	Version      *semver.Version
-	Change       Change
-	ChangeLog    string
+	Change       CommitPriority
+	ChangeLog    changeLog //map[string][]string
 	Branch       string
 	IsPreRelease bool
+}
+
+func (c changeLog) String() string {
+	var b bytes.Buffer
+	for key, logMessage := range c {
+		commitType := commitTypes[key]
+		b.WriteString(fmt.Sprintf("#### %s \n\n %s\n", commitType.Description, strings.Join(logMessage, "\n")))
+	}
+	return b.String()
 }
 
 // Config ...
@@ -74,12 +88,31 @@ type Change struct {
 	Major, Minor, Patch bool
 }
 
-// Less ..
-func (r Releases) Less(i, j int) bool {
-	return r[j].Version.LessThan(r[i].Version)
+// // Less ..
+// func (r Releases) Less(i, j int) bool {
+// 	return r[j].Version.LessThan(r[i].Version)
+// }
+
+// // Swap ..
+// func (r Releases) Swap(i, j int) {
+// 	r[i], r[j] = r[j], r[i]
+// }
+
+// CommitPriority ...
+type CommitPriority struct {
+	Name  string `json:"name,omitempty"`
+	value int
 }
 
-// Swap ..
-func (r Releases) Swap(i, j int) {
-	r[i], r[j] = r[j], r[i]
+var (
+	patch = CommitPriority{Name: "patch", value: 1}
+	minor = CommitPriority{Name: "minor", value: 2}
+	major = CommitPriority{Name: "major", value: 3}
+)
+
+// CommitType ...
+type CommitType struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"descrition,omitempty"`
+	priority    CommitPriority
 }
