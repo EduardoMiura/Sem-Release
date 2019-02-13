@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver"
 )
@@ -48,12 +49,28 @@ type changeLog map[string][]string
 
 // Release ..
 type Release struct {
-	SHA          string
-	Version      *semver.Version
-	Change       CommitPriority
-	ChangeLog    changeLog //map[string][]string
-	Branch       string
-	IsPreRelease bool
+	SHA             string
+	Version         *semver.Version
+	PreviousVersion *semver.Version
+	Change          CommitPriority
+	ChangeLog       changeLog
+	Branch          string
+	IsPreRelease    bool
+	Repository      string
+	Owner           string
+}
+
+func (r Release) getReleaseNote() string {
+	var b bytes.Buffer
+	version := r.Version.String()
+
+	if r.PreviousVersion != nil {
+		b.WriteString(fmt.Sprintf("## [%s](https://github.com/%s/%s/compare/v%s...v%s) (%s)\n\n", version, r.Owner, r.Repository, r.PreviousVersion.String(), version, time.Now().UTC().Format("2006-01-02")))
+	} else {
+		b.WriteString(fmt.Sprintf("## %s (%s)\n\n", version, time.Now().UTC().Format("2006-01-02")))
+	}
+	b.WriteString(r.ChangeLog.String())
+	return b.String()
 }
 
 func (c changeLog) String() string {
@@ -87,16 +104,6 @@ type Releases []*Release
 type Change struct {
 	Major, Minor, Patch bool
 }
-
-// // Less ..
-// func (r Releases) Less(i, j int) bool {
-// 	return r[j].Version.LessThan(r[i].Version)
-// }
-
-// // Swap ..
-// func (r Releases) Swap(i, j int) {
-// 	r[i], r[j] = r[j], r[i]
-// }
 
 // CommitPriority ...
 type CommitPriority struct {

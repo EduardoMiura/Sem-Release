@@ -20,8 +20,8 @@ const (
 // Repository ...
 type Repository interface {
 	CloneRepository(ctx context.Context, owner, repo, token string) error
-	ListCommits(ctx context.Context, owner, repo string, latestRelease string) ([]Commit, error)
-	GetLatestRelease(ctx context.Context, owner, repo string) (string, error)
+	ListCommits(ctx context.Context, owner, repo string, currentVersion string) ([]Commit, error)
+	GetLatestVersion(ctx context.Context, owner, repo string) (string, error)
 
 	getReference(ctx context.Context, owner, repo, reference string) (*github.Reference, error)
 	createRelease(ctx context.Context, owner, repo string, repositoryRelease *github.RepositoryRelease) (*github.RepositoryRelease, error)
@@ -47,10 +47,10 @@ func (r GitHubRepository) CloneRepository(ctx context.Context, owner, repo, toke
 }
 
 // ListCommits ...
-func (r GitHubRepository) ListCommits(ctx context.Context, owner, repo string, lastestRelease string) ([]Commit, error) {
+func (r GitHubRepository) ListCommits(ctx context.Context, owner, repo string, currentVersion string) ([]Commit, error) {
 	var commits []Commit
 	var stdout bytes.Buffer
-	
+
 	path, err := os.Getwd()
 	if err != nil {
 		return commits, err
@@ -61,8 +61,8 @@ func (r GitHubRepository) ListCommits(ctx context.Context, owner, repo string, l
 		fmt.Sprintf("--format=%s", logFormat),
 	}
 
-	if lastestRelease != "" {
-		args = append(args, fmt.Sprintf("%s..", lastestRelease))
+	if currentVersion != "" {
+		args = append(args, fmt.Sprintf("%s..", currentVersion))
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -80,8 +80,8 @@ func (r GitHubRepository) ListCommits(ctx context.Context, owner, repo string, l
 	return commits, err
 }
 
-// GetLatestRelease ...
-func (r GitHubRepository) GetLatestRelease(ctx context.Context, owner, repo string) (string, error) {
+// GetLatestVersion ...
+func (r GitHubRepository) GetLatestVersion(ctx context.Context, owner, repo string) (string, error) {
 	var stdout bytes.Buffer
 	path, err := os.Getwd()
 	if err != nil {
@@ -97,9 +97,9 @@ func (r GitHubRepository) GetLatestRelease(ctx context.Context, owner, repo stri
 	}
 
 	version := strings.Trim(stdout.String(), "\n")
-	if version == "" {
-		version = initialVersion
-	}
+	// if version == "" {
+	// 	version = initialVersion
+	// }
 	return version, nil
 }
 

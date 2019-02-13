@@ -21,18 +21,32 @@ func main() {
 	repository := semrelease.NewRepository(client)
 	owner := os.Getenv("OWNER")
 	repo := os.Getenv("REPOSITORY")
-	repository.CloneRepository(ctx, owner, repo, accessToken)
+
+	err := repository.CloneRepository(ctx, owner, repo, accessToken)
+	if err != nil {
+		log.Fatal("clone_repository", err)
+	}
+
+	releaseBranch := os.Getenv("RELEASE_BRANCH")
 	service := semrelease.NewService(repository)
-	service.CreateRelease(ctx, owner, repo)
+	service.CreateRelease(ctx, owner, repo, releaseBranch)
 
 	// TODO: update repository to make funcs private. (they are public to test repository)
-	version, err := repository.GetLatestRelease(ctx, owner, repo)
+	version, err := repository.GetLatestVersion(ctx, owner, repo)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println(version)
+	log.Println("version...", version)
 	commits, err := repository.ListCommits(ctx, owner, repo, version)
 	if err != nil {
 		log.Fatal("commits ", err, commits)
 	}
 }
+
+/*TODO:
+
+- parametrizar qual é a release branch
+- utilizar template para gerar o change log
+-
+
+*/
