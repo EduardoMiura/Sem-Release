@@ -3,35 +3,11 @@ package semrelease
 import (
 	"bytes"
 	"fmt"
-	"mime/multipart"
 	"strings"
 	"time"
 
 	"github.com/Masterminds/semver"
 )
-
-// Repo ..
-type Repo struct {
-	Owner Owner  `json:"owner"`
-	Name  string `json:"name"`
-}
-
-// PullRequest ..
-type PullRequest struct {
-	Merged bool `json:"merged"`
-}
-
-// Event ..
-type Event struct {
-	Repository  Repo         `json:"repository"`
-	Action      string       `json:"action"`
-	PullRequest *PullRequest `json:"pull_request"`
-}
-
-// Owner ..
-type Owner struct {
-	Login string `json:"login"`
-}
 
 // Commit ..
 type Commit struct {
@@ -42,7 +18,10 @@ type Commit struct {
 	Scope            string     `json:"scope,omitempty"`
 	Message          string     `json:"message,omitempty"`
 	SanitizedMessage string     `json:"sanitizeMessage,omitempty"`
-	Change           Change     `json:"change,omitempty"`
+}
+
+func (c Commit) String() string {
+	return fmt.Sprintf("* **%s:** %s (%s)", c.Scope, c.Message, c.AbbreviatedSHA)
 }
 
 type changeLog map[string][]string
@@ -82,40 +61,17 @@ func (c changeLog) String() string {
 	return b.String()
 }
 
-// Config ...
-type Config struct {
-	InstalationID string         `json:"InstalationID,omitempty"`
-	IntegrationID string         `json:"IntegrationId,omitempty"`
-	File          multipart.File `json:"File,omitempty"`
-}
-
-// TagRequest ...
-type TagRequest struct {
-	Tag     *string `json:"tag,omitempty"`
-	Message *string `json:"message,omitempty"`
-	Object  *string `json:"object,omitempty"`
-	Type    *string `json:"type,omitempty"`
-}
-
-// Releases ..
-type Releases []*Release
-
-// Change ..
-type Change struct {
-	Major, Minor, Patch bool
-}
+var (
+	patch = CommitPriority{Name: "patch", value: 1}
+	minor = CommitPriority{Name: "minor", value: 2}
+	major = CommitPriority{Name: "major", value: 3}
+)
 
 // CommitPriority ...
 type CommitPriority struct {
 	Name  string `json:"name,omitempty"`
 	value int
 }
-
-var (
-	patch = CommitPriority{Name: "patch", value: 1}
-	minor = CommitPriority{Name: "minor", value: 2}
-	major = CommitPriority{Name: "major", value: 3}
-)
 
 // CommitType ...
 type CommitType struct {
