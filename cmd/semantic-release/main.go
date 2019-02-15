@@ -20,6 +20,6 @@ func main() {
 	client := github.NewClient(tc)
 	repository := semrelease.NewRepository(client)
 	service := semrelease.NewService(repository)
-
-	fmt.Println(service.CreateRelease(ctx, config.Owner, config.Repository, config.AccessToken, config.ReleaseBranch))
+	rel, _ := service.CreateRelease(ctx, config.Owner, config.Repository, config.AccessToken, config.ReleaseBranch)
+	fmt.Println(rel)
 }
