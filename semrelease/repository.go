@@ -14,7 +14,7 @@ import (
 
 const (
 	logFormat      = `{"sha": "%H", "abbreviatedSHA": "%h", "message": "%s", "sanitizedMessage": "%f"},`
-	initialVersion = "vT1.0.0"
+	initialVersion = "v1.0.0"
 )
 
 // Repository ...
@@ -100,7 +100,7 @@ func (r GitHubRepository) getLatestVersion(ctx context.Context, owner, repo stri
 }
 
 func (r GitHubRepository) createRelease(ctx context.Context, release Release) (*github.RepositoryRelease, error) {
-	tag := fmt.Sprintf("vT%s", release.Version.String())
+	tag := fmt.Sprintf("v%s", release.Version.String())
 	releaseNote := release.getReleaseNote()
 	repositoryRelease := &github.RepositoryRelease{
 		TagName:         &tag,

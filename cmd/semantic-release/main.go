@@ -20,6 +20,11 @@ func main() {
 	client := github.NewClient(tc)
 	repository := semrelease.NewRepository(client)
 	service := semrelease.NewService(repository)
-	rel, _ := service.CreateRelease(ctx, config.Owner, config.Repository, config.AccessToken, config.ReleaseBranch)
-	fmt.Println(rel)
+	version, err := service.CreateRelease(ctx, config.Owner, config.Repository, config.AccessToken, config.ReleaseBranch)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf(fmt.Sprintf(`{"version": "v%v"}`, version))
+
 }

@@ -66,7 +66,7 @@ func (s Service) CreateRelease(ctx context.Context, owner, repo, accessToken, re
 	release := s.newRelease(ctx, owner, repo, releaseBranch, currentVersion, cm)
 	s.Repository.createRelease(ctx, release)
 
-	return nil, err
+	return release.Version, err
 }
 
 func (s Service) newRelease(ctx context.Context, owner, repo, branch, currentVersion string, commits []Commit) Release {
