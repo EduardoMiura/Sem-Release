@@ -87,7 +87,7 @@ func (r GitHubRepository) getLatestVersion(ctx context.Context, owner, repo stri
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "refs/tags", "--sort=-taggerdate", "--format=%(refname:short)", "--count=1")
+	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "refs/tags", "--sort=-creatordate", "--format=%(refname:short)", "--count=1")
 	cmd.Dir = fmt.Sprintf("%s/%s", path, repo)
 	cmd.Stdout = &stdout
 	err = cmd.Run()
