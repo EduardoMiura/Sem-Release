@@ -48,16 +48,21 @@ func (s Service) CreateRelease(ctx context.Context, owner, repo, accessToken, re
 	if err != nil {
 		return nil, err
 	}
-
-	currentVersion, err := s.Repository.getLatestVersion(ctx, owner, repo)
+	err = s.Repository.checkoutBranch(ctx, repo, releaseBranch)
+	if err != nil {
+		return nil, err
+	}
+	currentVersion, err := s.Repository.getLatestVersion(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
 
-	cm, err := s.Repository.listCommits(ctx, owner, repo, currentVersion)
+	cm, err := s.Repository.listCommits(ctx, repo, currentVersion)
 	if err != nil {
+
 		return nil, err
 	}
+
 	if len(cm) == 0 {
 		log.Println("no commits")
 		return nil, nil

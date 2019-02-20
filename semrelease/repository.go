@@ -20,8 +20,9 @@ const (
 // Repository ...
 type Repository interface {
 	cloneRepository(ctx context.Context, owner, repo, token string) error
-	listCommits(ctx context.Context, owner, repo string, currentVersion string) ([]Commit, error)
-	getLatestVersion(ctx context.Context, owner, repo string) (string, error)
+	checkoutBranch(ctx context.Context, repo, branch string) error
+	listCommits(ctx context.Context, repo, currentVersion string) ([]Commit, error)
+	getLatestVersion(ctx context.Context, repo string) (string, error)
 	createRelease(ctx context.Context, release Release) (*github.RepositoryRelease, error)
 }
 
@@ -44,8 +45,19 @@ func (r GitHubRepository) cloneRepository(ctx context.Context, owner, repo, toke
 	return cmd.Run()
 }
 
+func (r GitHubRepository) checkoutBranch(ctx context.Context, repo, branch string) error {
+	path, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
+	cmd.Dir = fmt.Sprintf("%s/%s", path, repo)
+	return cmd.Run()
+}
+
 // ListCommits ...
-func (r GitHubRepository) listCommits(ctx context.Context, owner, repo string, currentVersion string) ([]Commit, error) {
+func (r GitHubRepository) listCommits(ctx context.Context, repo, currentVersion string) ([]Commit, error) {
+
 	var commits []Commit
 	var stdout bytes.Buffer
 
@@ -71,7 +83,7 @@ func (r GitHubRepository) listCommits(ctx context.Context, owner, repo string, c
 	}
 
 	output := stdout.String()
-	
+
 	if output != "" {
 		jsonCommits := fmt.Sprintf("[%s]", output[:len(output)-2])
 		err = json.Unmarshal([]byte(jsonCommits), &commits)
@@ -80,7 +92,7 @@ func (r GitHubRepository) listCommits(ctx context.Context, owner, repo string, c
 }
 
 // GetLatestVersion ...
-func (r GitHubRepository) getLatestVersion(ctx context.Context, owner, repo string) (string, error) {
+func (r GitHubRepository) getLatestVersion(ctx context.Context, repo string) (string, error) {
 	var stdout bytes.Buffer
 	path, err := os.Getwd()
 	if err != nil {
