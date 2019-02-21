@@ -140,7 +140,11 @@ func parseCommit(commit Commit) *Commit {
 
 	commit.Raw = strings.Split(message, " ")
 	commitType := commitValues["type"]
-	commit.Type = commitTypes[commitType]
+	var found bool
+	commit.Type, found = commitTypes[commitType]
+	if !found {
+		return nil
+	}
 	commit.Scope = commitValues["scope"]
 	commit.Message = commitValues["message"]
 
